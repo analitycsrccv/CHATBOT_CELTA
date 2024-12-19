@@ -72,7 +72,38 @@ def recibir_mensajes(req):
         value = changes['value']
         objeto_mensaje = value['messages']
         
-        agregar_mensajes_log(json.dumps(objeto_mensaje))
+        if objeto_mensaje:
+            messages = objeto_mensaje[0]
+
+            if "type" in messages:
+                tipo = messages["type"]
+
+                #Guardar Log en la BD
+                agregar_mensajes_log(json.dumps(messages))
+
+                if tipo == "interactive":
+                    tipo_interactivo = messages["interactive"]["type"]
+
+                    if tipo_interactivo == "button_reply":
+                        text = messages["interactive"]["button_reply"]["id"]
+                        numero = messages["from"]
+
+                        enviar_mensajes_whatsapp(text,numero)
+                    
+                    elif tipo_interactivo == "list_reply":
+                        text = messages["interactive"]["list_reply"]["id"]
+                        numero = messages["from"]
+
+                        enviar_mensajes_whatsapp(text,numero)
+
+                if "text" in messages:
+                    text = messages["text"]["body"]
+                    numero = messages["from"]
+
+                    enviar_mensajes_whatsapp(text,numero)
+
+                    #Guardar Log en la BD
+                    agregar_mensajes_log(json.dumps(messages))
 
         return jsonify({'message':'EVENT_RECEIVED'})
     except Exception as e:
@@ -110,5 +141,6 @@ def enviar_mensajes_whatsapp(texto,number):
         agregar_mensajes_log(json.dumps(e))
     finally:
         connection.close()
+
 if __name__=='__main__':
     app.run(host="0.0.0.0",port = 80)
