@@ -1,10 +1,10 @@
-from flask import Flask, render_template
+from flask import Flask, request, jsonify, render_template
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import http.client
 import json
 
-app = Flask (__name__)
+app = Flask(__name__)
 
 #Configuracion de la base de datos SQLITE
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///metapython.db'
@@ -42,7 +42,6 @@ def agregar_mensajes_log(texto):
     nuevo_registro = Log(texto=texto)
     db.session.add(nuevo_registro)
     db.session.commit()
-
-
+    
 if __name__=='__main__':
     app.run(host="0.0.0.0",port = 80)
