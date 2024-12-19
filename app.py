@@ -367,13 +367,14 @@ def enviar_mensajes_whatsapp(texto,number):
     #Convertir el diccionaria a formato JSON
     data=json.dumps(data)
 
+    # Token
     headers = {
         "Content-Type" : "application/json",
-        "Authorization" : "Bearer EAAI8epaNZBKABO7JxY2jEcq27sFXd5aWZCRlj7sscbE7zGdZCbTUAediKMLir22zZAvD0eAbcOEean4EBfiMGTP0RZB1pgfLEFZCRSrEtWp4ktZBcVsharmVjMdR99ZChesZBW7KE4pDMZBOxOZCs7sZBDCc6DlA6ja8rgPdLLJkVROzb8B9BbOUAb5OaSoRP0evqhK73scKhqu80Yjy8bNy6nzaUswsNbgWjMOD8FMZD"
+        "Authorization" : "Bearer EAAI8epaNZBKABO1xCdZA3LZBjZA02njHoYJ8MjKu0cP1mka7WwpCzdDEmR8EXGKhQaDushNuTkra370rOxDefAKwEQmfnWKzULwe4459eOOd4BwhetDhs9cuZCTbQTknJPYpGVZAhX5q2VPRvDErwhpBJZAW32ab8er0z895HScUd2KRh3iZBajdoas2h8EQPWu4ypYfa1llQA0o0Se6BYvJOEgmBi9KgZAYmNisZD"
     }
-
+    
     connection = http.client.HTTPSConnection("graph.facebook.com")
-
+    
     try:
         connection.request("POST","/v21.0/484107578125461/messages", data, headers)
         response = connection.getresponse()
