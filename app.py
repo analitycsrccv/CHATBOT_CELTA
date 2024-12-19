@@ -44,7 +44,7 @@ def agregar_mensajes_log(texto):
     db.session.commit()
     
 #Token de verificacion para la configuracion
-TOKEN_ANDERCODE = "ANDERCODE"
+TOKEN_ANDERCODE = " "
 
 @app.route('/webhook', methods=['GET','POST'])
 def webhook():
@@ -65,8 +65,50 @@ def verificar_token(req):
         return jsonify({'error':'Token Invalido'}),401
 
 def recibir_mensajes(req):
-    req = request.get_json()
-    return jsonify({'message':'EVENT_RECEIVED'})
+    try:
+        req = request.get_json()
+        entry =req['entry'][0]
+        changes = entry['changes'][0]
+        value = changes['value']
+        objeto_mensaje = value['messages']
+        
+        agregar_mensajes_log(json.dumps(objeto_mensaje))
+
+        return jsonify({'message':'EVENT_RECEIVED'})
+    except Exception as e:
+        return jsonify({'message':'EVENT_RECEIVED'})
+
+def enviar_mensajes_whatsapp(texto,number):
+    texto = texto.lower()
+
+    if "hola" in texto:
+        data={
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": number,
+            "type": "text",
+            "text": {
+                "preview_url": False,
+                "body": "🚀 Hola, ¿Cómo estás? Bienvenido."
+            }
+        }
+    #Convertir el diccionaria a formato JSON
+    data=json.dumps(data)
+
+    headers = {
+        "Content-Type" : "application/json",
+        "Authorization" : "Bearer EAAM1QqlQV90BO2QbeOuwedmZAgbAHfCnZBUmQsjP3phs4UEK2fRuYGbZBH7B8nEz3QhV4wt4NEhgfZCvUOQCxZAeNGnaZBBfmMA4ipeMiPD43d2gvxzMrebJm3hilKHcYwOCxZCZCcxJau1wrgugRGehuzs8ZC7jCHzr9lluJvcfUAiYwK5IuQGG7rd4Bz6MoZB902TGkIYdVZBEB1XGzfCOS1HxKccJiv4YLdGcUYZD"
+    }
     
+    connection = http.client.HTTPSConnection("graph.facebook.com")
+    
+    try:
+        connection.request("POST","/v21.0/484107578125461/messages", data, headers)
+        response = connection.getresponse()
+        print(response.status, response.reason)
+    except Exception as e:
+        agregar_mensajes_log(json.dumps(e))
+    finally:
+        connection.close()
 if __name__=='__main__':
     app.run(host="0.0.0.0",port = 80)
