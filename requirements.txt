@@ -111,6 +111,7 @@ python-dotenv==1.0.1
 pytz==2024.1
 PyVirtualDisplay==3.0
 pyviz_comms==3.0.3
+pywin32==306
 PyYAML==6.0.2
 pyzmq==26.0.3
 referencing==0.35.1
