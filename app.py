@@ -3,13 +3,19 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import http.client
 import json
+from openai import OpenAI
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 app = Flask(__name__)
 
 #Configuracion de la base de datos SQLITE
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///metapython.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db =SQLAlchemy(app)
+db = SQLAlchemy(app)
 
 #Modelo de la tabla log
 class Log(db.Model):
@@ -33,6 +39,21 @@ def index():
     return render_template('index.html',registros=registros_ordenados)
 
 mensajes_log = []
+
+def get_chatgpt_response(texto):
+    try:
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{
+                "role": "user",
+                "content": texto
+            }],
+            max_tokens=150
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Error with ChatGPT API: {e}")
+        return "Lo siento, hubo un error al procesar tu mensaje."
 
 #Funcion para agregar mensajes y guardar en la base de datos
 def agregar_mensajes_log(texto):
@@ -108,7 +129,7 @@ def recibir_mensajes(req):
         return jsonify({'message':'EVENT_RECEIVED'})
     except Exception as e:
         return jsonify({'message':'EVENT_RECEIVED'})
-
+    
 def enviar_mensajes_whatsapp(texto,number):
     texto = texto.lower()
 
@@ -353,24 +374,25 @@ def enviar_mensajes_whatsapp(texto,number):
             }
         }
     else:
-        data={
+        respuesta = get_chatgpt_response(texto)
+        data = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": number,
             "type": "text",
             "text": {
                 "preview_url": False,
-                "body": "🚀 Hola, visita mi web anderson-bastidas.com para más información.\n \n📌Por favor, ingresa un número #️⃣ para recibir información.\n \n1️⃣. Información del Curso. ❔\n2️⃣. Ubicación del local. 📍\n3️⃣. Enviar temario en PDF. 📄\n4️⃣. Audio explicando curso. 🎧\n5️⃣. Video de Introducción. ⏯️\n6️⃣. Hablar con AnderCode. 🙋‍♂️\n7️⃣. Horario de Atención. 🕜 \n0️⃣. Regresar al Menú. 🕜"
+                "body": respuesta
             }
         }
 
     #Convertir el diccionaria a formato JSON
-    data=json.dumps(data)
+    data = json.dumps(data)
 
     # Token
     headers = {
         "Content-Type" : "application/json",
-        "Authorization" : "Bearer EAAI8epaNZBKABO08vo1IZBt5CnMwWX5sa3g7Vs4SKZAa5wkWZBfIbitmVcW84VwTOy0XpTpDxrtwhXZAOUeS6XrDytNr9RAo6z6DZCjP37wTy8VzwR86TIc41Qx0o1MSo9VZAzgxuoqjyjUUt0qEXduu1LRaWCoVUfFIzV5LmcclYneZCHhOf4sy6hleMFpPDbQoRlkjyhEgDwfKTtzNEZBXbUzkfZCShKaQA2AK1o"
+        "Authorization" : "Bearer EAAI8epaNZBKABOZB5OsSz06sgqKZCLoPXFepCefrzTvXQYZBydBbRDcfW8w2sShZB4EsPVh3DRHqu6Ot6slF0aAHLHGLvHyDlslJv4RMjEZADGrAqybuX7zMxraKkspCEvFml7c4rs9nEjUhsRD4ZB7NUATpbzqQKDzkBiVgwZA38l4r9sMkzVFcce1M9xQFb40UZBxciRRVBHN9YOmCdJMjJzDoiwqEI0rUwZAyMZD"
     }
     
     connection = http.client.HTTPSConnection("graph.facebook.com")
@@ -385,4 +407,4 @@ def enviar_mensajes_whatsapp(texto,number):
         connection.close()
 
 if __name__=='__main__':
-    app.run(host='0.0.0.0',port=80,debug=True)
+    app.run(host='0.0.0.0',port=80,debug=True)    
