@@ -42,6 +42,7 @@ mensajes_log = []
 
 def get_chatgpt_response(texto):
     try:
+        print(f"Intentando obtener respuesta de OpenAI para: {texto}")
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[{
@@ -50,9 +51,10 @@ def get_chatgpt_response(texto):
             }],
             max_tokens=150
         )
+        print(f"Respuesta recibida de OpenAI: {response.choices[0].message.content}")
         return response.choices[0].message.content
     except Exception as e:
-        print(f"Error with ChatGPT API: {e}")
+        print(f"Error detallado con OpenAI: {str(e)}")
         return "Lo siento, hubo un error al procesar tu mensaje."
 
 #Funcion para agregar mensajes y guardar en la base de datos
