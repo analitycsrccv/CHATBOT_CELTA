@@ -27,7 +27,7 @@ def ordenar_por_fecha_y_hora(registros):
 
 @app.route('/')
 def index():
-    #obtener todos los registros ed la base de datos
+    #obtener todos los registros de la base de datos
     registros = Log.query.all()
     registros_ordenados = ordenar_por_fecha_y_hora(registros)
     return render_template('index.html',registros=registros_ordenados)
@@ -370,7 +370,7 @@ def enviar_mensajes_whatsapp(texto,number):
     # Token
     headers = {
         "Content-Type" : "application/json",
-        "Authorization" : "Bearer EAAI8epaNZBKABO1xCdZA3LZBjZA02njHoYJ8MjKu0cP1mka7WwpCzdDEmR8EXGKhQaDushNuTkra370rOxDefAKwEQmfnWKzULwe4459eOOd4BwhetDhs9cuZCTbQTknJPYpGVZAhX5q2VPRvDErwhpBJZAW32ab8er0z895HScUd2KRh3iZBajdoas2h8EQPWu4ypYfa1llQA0o0Se6BYvJOEgmBi9KgZAYmNisZD"
+        "Authorization" : "Bearer EAAI8epaNZBKABOZB34nGBnCADIWsB09ek1VH6RqlWbfpZC6ShadPFWx0ImUt6K1WIJbAN3nNgqGf1kGomN3QQBAh2UXzwOZB2despcPXsieZARRnMbBg89JA8F6ARrGgBOkwnsBx1xT60tRthmPc7rtUdW60KdhbvOTRE1agu8uJNZBCGObZA69syuUQ5C04BUBdr1B25r26yGjHrMcCAFSy7sTZChTn9HfutAQZD"
     }
     
     connection = http.client.HTTPSConnection("graph.facebook.com")
