@@ -6,14 +6,10 @@ import json
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
-from langchain_community.utilities.sql_database import SQLDatabase
+from langchain_community.utilities import SQLDatabase
 from langchain_openai import ChatOpenAI
-from langchain.agents import create_sql_agent
-from langchain.agents.agent_types import AgentType
-from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_community.agent_toolkits.sql import SQLDatabaseToolkit
 from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
@@ -35,20 +31,18 @@ class Log(db.Model):
 with app.app_context():
     db.create_all()
 
-# Inicialización del agente SQL
-sql_db = SQLDatabase.from_uri(f"sqlite:///metapython.db")
+# Inicialización del modelo de lenguaje y herramientas
 llm = ChatOpenAI(
     temperature=0,
     model_name="gpt-3.5-turbo",
     api_key=os.getenv('OPENAI_API_KEY')
 )
+
+# Conexión a la base de datos para consultas
+sql_db = SQLDatabase.from_uri(f"sqlite:///metapython.db")
+
+# Toolkit para la base de datos
 toolkit = SQLDatabaseToolkit(db=sql_db, llm=llm)
-sql_agent = create_sql_agent(
-    llm=llm,
-    toolkit=toolkit,
-    agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-    verbose=True
-)
 
 # Template para consultas INSERT
 insert_template = PromptTemplate(
@@ -60,39 +54,51 @@ insert_template = PromptTemplate(
     Solo devuelve la sentencia SQL sin ningún otro texto.
     """
 )
-insert_chain = LLMChain(llm=llm, prompt=insert_template)
 
 def process_sql_query(texto):
     """
-    Procesa una consulta en lenguaje natural para la base de datos usando LangChain
+    Procesa una consulta en lenguaje natural para la base de datos
     """
     texto_lower = texto.lower().strip()
     print(f"Procesando consulta SQL: {texto_lower}")
 
     try:
-        if any(keyword in texto_lower for keyword in ['buscar', 'mostrar', 'ver', 'listar', 'obtener']):
-            result = sql_agent.run(texto_lower)
-            return result
-        
+        # Para búsqueda de registros
+        if any(keyword in texto_lower for keyword in ['busca', 'buscar', 'mostrar', 'ver', 'listar']):
+            with app.app_context():
+                registros = Log.query.order_by(Log.fecha_y_hora.desc()).limit(5).all()
+                if not registros:
+                    return "No hay registros en la base de datos."
+                
+                respuesta = "📝 Últimos registros:\n\n"
+                for reg in registros:
+                    fecha_str = reg.fecha_y_hora.strftime('%Y-%m-%d %H:%M')
+                    try:
+                        texto_reg = json.loads(reg.texto)
+                        if 'text' in texto_reg:
+                            mensaje = texto_reg['text']['body']
+                        else:
+                            mensaje = str(texto_reg)
+                    except:
+                        mensaje = reg.texto
+                    respuesta += f"📅 {fecha_str}: {mensaje}\n"
+                return respuesta
+
+        # Para añadir registros
         elif any(keyword in texto_lower for keyword in ['añadir', 'agregar', 'crear', 'guardar', 'registrar']):
-            try:
-                sql_query = insert_chain.run(table="log", user_input=texto_lower)
-                with app.app_context():
-                    nuevo_registro = Log(texto=texto_lower)
-                    db.session.add(nuevo_registro)
-                    db.session.commit()
+            with app.app_context():
+                mensaje = texto_lower.split(":", 1)[1].strip() if ":" in texto_lower else texto_lower
+                nuevo_registro = Log(texto=mensaje)
+                db.session.add(nuevo_registro)
+                db.session.commit()
                 return "✅ Mensaje guardado correctamente en la base de datos."
-            except Exception as e:
-                print(f"Error en insert: {str(e)}")
-                return f"❌ Error al insertar: {str(e)}"
 
         return None
 
     except Exception as e:
         print(f"Error en process_sql_query: {str(e)}")
-        return f"❌ Error al procesar la consulta: {str(e)}"
-
-#Funcion para ordenar los registros por fecha y hora
+        return None
+    
 def ordenar_por_fecha_y_hora(registros):
     return sorted(registros, key=lambda x: x.fecha_y_hora,reverse=True)
 
@@ -123,17 +129,13 @@ def get_chatgpt_response(texto):
         print("DETAILED ERROR:", str(e))
         print("Error type:", type(e))
         return f"Error detallado: {str(e)}"
-    
-#Funcion para agregar mensajes y guardar en la base de datos
+
 def agregar_mensajes_log(texto):
     mensajes_log.append(texto)
-
-    #Guardar el mensaje en la base de datos
     nuevo_registro = Log(texto=texto)
     db.session.add(nuevo_registro)
     db.session.commit()
 
-#Token de verificacion para la configuracion
 TOKEN_ANDERCODE = "ANDERCODE"
 
 @app.route('/webhook', methods=['GET','POST'])
@@ -168,7 +170,6 @@ def recibir_mensajes(req):
             if "type" in messages:
                 tipo = messages["type"]
 
-                #Guardar Log en la BD
                 agregar_mensajes_log(json.dumps(messages))
 
                 if tipo == "interactive":
@@ -192,7 +193,6 @@ def recibir_mensajes(req):
 
                     enviar_mensajes_whatsapp(text,numero)
 
-                    #Guardar Log en la BD
                     agregar_mensajes_log(json.dumps(messages))
 
         return jsonify({'message':'EVENT_RECEIVED'})
@@ -459,7 +459,7 @@ def enviar_mensajes_whatsapp(texto,number):
                 }
             }
         else:
-            # Si no es una consulta SQL, usar ChatGPT como antes
+            # Si no es una consulta SQL, usar ChatGPT
             respuesta = get_chatgpt_response(texto)
             data = {
                 "messaging_product": "whatsapp",
@@ -472,10 +472,8 @@ def enviar_mensajes_whatsapp(texto,number):
                 }
             }
 
-    #Convertir el diccionaria a formato JSON
     data = json.dumps(data)
-
-    # Token
+    
     headers = {
         "Content-Type" : "application/json",
         "Authorization" : "Bearer EAAI8epaNZBKABO2RkvBRKJKb4C9fWeTD7LC7ibV28t3kanq1b5nUkqLnIMkPZBCLfP07twzAfB2xwST77ym4WkqfGVCebDUjxVk16eJECQrlJPBRVy8cebSQAZAI4Du46iEwLQi6QNgfXhz9mMyRjBcBTRu2mVWOK6jAHRq3ekPgbLBzyKbSKjF5u0PnSl6qlfL0LpkseBjdr6UIWmqYJbXu7c1TvvUZCG4ZD"
@@ -493,4 +491,4 @@ def enviar_mensajes_whatsapp(texto,number):
         connection.close()
 
 if __name__=='__main__':
-    app.run(host='0.0.0.0',port=80,debug=True)             
+    app.run(host='0.0.0.0',port=80,debug=True)        
