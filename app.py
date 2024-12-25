@@ -6,11 +6,12 @@ import json
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
-from langchain_community.agents import create_sql_agent
-from langchain.agents.agent_types import AgentType
-from langchain_community.utilities import SQLDatabase
+from langchain_community.utilities.sql_database import SQLDatabase
 from langchain_openai import ChatOpenAI
-from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from langchain.agents import create_sql_agent
+from langchain.agents.agent_types import AgentType
+from langchain_community.utilities.sql_database import SQLDatabase
+from langchain_community.agent_toolkits.sql import SQLDatabaseToolkit
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
