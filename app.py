@@ -72,20 +72,45 @@ def process_sql_query(texto):
     
     try:
         if any(keyword in texto_lower for keyword in select_keywords):
-            result = sql_agent.run(texto)
-            return result
+            # Si es una consulta general de "últimos registros", hacemos una consulta predeterminada
+            if "ultimos" in texto_lower and "registros" in texto_lower:
+                with app.app_context():
+                    # Obtener los últimos 5 registros
+                    ultimos_registros = Log.query.order_by(Log.fecha_y_hora.desc()).limit(5).all()
+                    # Formatear la respuesta
+                    respuesta = "Aquí están los últimos registros:\n\n"
+                    for reg in ultimos_registros:
+                        respuesta += f"📅 {reg.fecha_y_hora.strftime('%Y-%m-%d %H:%M')}: {reg.texto}\n"
+                    return respuesta
+            else:
+                result = sql_agent.run(texto)
+                return result
+                
         elif any(keyword in texto_lower for keyword in insert_keywords):
-            sql_query = insert_chain.run(table="log", user_input=texto)
-            with app.app_context():
-                nuevo_registro = Log(texto=texto)
-                db.session.add(nuevo_registro)
-                db.session.commit()
-            return "Datos insertados correctamente"
+            if "prueba" in texto_lower or "test" in texto_lower:
+                with app.app_context():
+                    nuevo_registro = Log(texto="Mensaje de prueba")
+                    db.session.add(nuevo_registro)
+                    db.session.commit()
+                return "✅ Mensaje de prueba insertado correctamente"
+            else:
+                # Extraer el mensaje a insertar después de los dos puntos
+                if ":" in texto:
+                    mensaje = texto.split(":", 1)[1].strip()
+                else:
+                    mensaje = texto
+                    
+                with app.app_context():
+                    nuevo_registro = Log(texto=mensaje)
+                    db.session.add(nuevo_registro)
+                    db.session.commit()
+                return "✅ Mensaje guardado correctamente"
         else:
             return None
             
     except Exception as e:
-        return f"Error al procesar la consulta: {str(e)}"
+        print(f"Error en process_sql_query: {str(e)}")
+        return f"Lo siento, ocurrió un error al procesar tu consulta: {str(e)}"
 
 #Funcion para ordenar los registros por fecha y hora
 def ordenar_por_fecha_y_hora(registros):
