@@ -6,6 +6,13 @@ import json
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
+from langchain.agents import create_sql_agent
+from langchain.agents.agent_types import AgentType
+from langchain.sql_database import SQLDatabase
+from langchain_openai import ChatOpenAI
+from langchain.agents.agent_toolkits import SQLDatabaseToolkit
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
@@ -27,6 +34,59 @@ class Log(db.Model):
 with app.app_context():
     db.create_all()
 
+# Inicialización del agente SQL
+sql_db = SQLDatabase.from_uri(f"sqlite:///metapython.db")
+llm = ChatOpenAI(
+    temperature=0,
+    model_name="gpt-3.5-turbo",
+    api_key=os.getenv('OPENAI_API_KEY')
+)
+toolkit = SQLDatabaseToolkit(db=sql_db, llm=llm)
+sql_agent = create_sql_agent(
+    llm=llm,
+    toolkit=toolkit,
+    agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+    verbose=True
+)
+
+# Template para consultas INSERT
+insert_template = PromptTemplate(
+    input_variables=["table", "user_input"],
+    template="""
+    Convierte la siguiente solicitud en una sentencia SQL INSERT:
+    Tabla: {table}
+    Solicitud: {user_input}
+    Solo devuelve la sentencia SQL sin ningún otro texto.
+    """
+)
+insert_chain = LLMChain(llm=llm, prompt=insert_template)
+
+def process_sql_query(texto):
+    """
+    Procesa una consulta en lenguaje natural y determina si es SELECT o INSERT
+    """
+    select_keywords = ['buscar', 'encontrar', 'mostrar', 'listar', 'obtener', 'cual', 'cuanto', 'donde', 'quien']
+    insert_keywords = ['agregar', 'insertar', 'crear', 'nuevo', 'añadir', 'registrar']
+    
+    texto_lower = texto.lower()
+    
+    try:
+        if any(keyword in texto_lower for keyword in select_keywords):
+            result = sql_agent.run(texto)
+            return result
+        elif any(keyword in texto_lower for keyword in insert_keywords):
+            sql_query = insert_chain.run(table="log", user_input=texto)
+            with app.app_context():
+                nuevo_registro = Log(texto=texto)
+                db.session.add(nuevo_registro)
+                db.session.commit()
+            return "Datos insertados correctamente"
+        else:
+            return None
+            
+    except Exception as e:
+        return f"Error al procesar la consulta: {str(e)}"
+
 #Funcion para ordenar los registros por fecha y hora
 def ordenar_por_fecha_y_hora(registros):
     return sorted(registros, key=lambda x: x.fecha_y_hora,reverse=True)
@@ -42,7 +102,7 @@ mensajes_log = []
 
 def get_chatgpt_response(texto):
     try:
-        print("API Key being used:", os.getenv('OPENAI_API_KEY'))  # Para ver si la clave se está cargando
+        print("API Key being used:", os.getenv('OPENAI_API_KEY'))
         print("Attempting to call OpenAI with text:", texto)
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -57,18 +117,14 @@ def get_chatgpt_response(texto):
     except Exception as e:
         print("DETAILED ERROR:", str(e))
         print("Error type:", type(e))
-        return f"Error detallado: {str(e)}"  
+        return f"Error detallado: {str(e)}"
 
-#Funcion para agregar mensajes y guardar en la base de datos
 def agregar_mensajes_log(texto):
     mensajes_log.append(texto)
-
-    #Guardar el mensaje en la base de datos
     nuevo_registro = Log(texto=texto)
     db.session.add(nuevo_registro)
     db.session.commit()
 
-#Token de verificacion para la configuracion
 TOKEN_ANDERCODE = "ANDERCODE"
 
 @app.route('/webhook', methods=['GET','POST'])
@@ -103,7 +159,6 @@ def recibir_mensajes(req):
             if "type" in messages:
                 tipo = messages["type"]
 
-                #Guardar Log en la BD
                 agregar_mensajes_log(json.dumps(messages))
 
                 if tipo == "interactive":
@@ -127,7 +182,6 @@ def recibir_mensajes(req):
 
                     enviar_mensajes_whatsapp(text,numero)
 
-                    #Guardar Log en la BD
                     agregar_mensajes_log(json.dumps(messages))
 
         return jsonify({'message':'EVENT_RECEIVED'})
@@ -378,25 +432,39 @@ def enviar_mensajes_whatsapp(texto,number):
             }
         }
     else:
-        respuesta = get_chatgpt_response(texto)
-        data = {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": number,
-            "type": "text",
-            "text": {
-                "preview_url": False,
-                "body": respuesta
+        # Primero intentar procesar como consulta SQL
+        sql_response = process_sql_query(texto)
+        
+        if sql_response:
+            data = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": number,
+                "type": "text",
+                "text": {
+                    "preview_url": False,
+                    "body": sql_response
+                }
             }
-        }
+        else:
+            # Si no es una consulta SQL, usar ChatGPT
+            respuesta = get_chatgpt_response(texto)
+            data = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": number,
+                "type": "text",
+                "text": {
+                    "preview_url": False,
+                    "body": respuesta
+                }
+            }
 
-    #Convertir el diccionaria a formato JSON
     data = json.dumps(data)
-
-    # Token
+    
     headers = {
         "Content-Type" : "application/json",
-        "Authorization" : "Bearer EAAI8epaNZBKABO2RkvBRKJKb4C9fWeTD7LC7ibV28t3kanq1b5nUkqLnIMkPZBCLfP07twzAfB2xwST77ym4WkqfGVCebDUjxVk16eJECQrlJPBRVy8cebSQAZAI4Du46iEwLQi6QNgfXhz9mMyRjBcBTRu2mVWOK6jAHRq3ekPgbLBzyKbSKjF5u0PnSl6qlfL0LpkseBjdr6UIWmqYJbXu7c1TvvUZCG4ZD"
+        "Authorization" : "Bearer EAAI8epaNZBKABOwHUXCVB0UIZC6EJ4X18qg1OkZAqZAydtUkyMhCPmuJR9hSDgZAXfmzRuZCrlZAgaLgrpiqQzwM5RqLBDSb8ZCSQFVZBV4P99xXuZBp44N7JkZAEIq8ZB9C9MyJmCwAxXAU3xCUHTCB1P72nPQVayQZC5lIE56VL2pyg5IBY7hxkGg2tCLVJNV7ZCaodV9ZAwZAKzXIPRwXmCukwhE6i9qJFYzQlTwLVS8ZD"
     }
     
     connection = http.client.HTTPSConnection("graph.facebook.com")
@@ -411,4 +479,4 @@ def enviar_mensajes_whatsapp(texto,number):
         connection.close()
 
 if __name__=='__main__':
-    app.run(host='0.0.0.0',port=80,debug=True)    
+    app.run(host='0.0.0.0',port=80,debug=True)      
