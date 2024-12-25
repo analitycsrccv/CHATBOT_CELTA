@@ -6,11 +6,11 @@ import json
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
-from langchain.agents import create_sql_agent
+from langchain_community.agents import create_sql_agent
 from langchain.agents.agent_types import AgentType
-from langchain.sql_database import SQLDatabase
+from langchain_community.utilities import SQLDatabase
 from langchain_openai import ChatOpenAI
-from langchain.agents.agent_toolkits import SQLDatabaseToolkit
+from langchain_community.agent_toolkits import SQLDatabaseToolkit
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 
@@ -63,54 +63,33 @@ insert_chain = LLMChain(llm=llm, prompt=insert_template)
 
 def process_sql_query(texto):
     """
-    Procesa una consulta en lenguaje natural y determina si es SELECT o INSERT
+    Procesa una consulta en lenguaje natural para la base de datos usando LangChain
     """
-    select_keywords = ['buscar', 'encontrar', 'mostrar', 'listar', 'obtener', 'cual', 'cuanto', 'donde', 'quien']
-    insert_keywords = ['agregar', 'insertar', 'crear', 'nuevo', 'añadir', 'registrar']
-    
-    texto_lower = texto.lower()
-    
+    texto_lower = texto.lower().strip()
+    print(f"Procesando consulta SQL: {texto_lower}")
+
     try:
-        if any(keyword in texto_lower for keyword in select_keywords):
-            # Si es una consulta general de "últimos registros", hacemos una consulta predeterminada
-            if "ultimos" in texto_lower and "registros" in texto_lower:
+        if any(keyword in texto_lower for keyword in ['buscar', 'mostrar', 'ver', 'listar', 'obtener']):
+            result = sql_agent.run(texto_lower)
+            return result
+        
+        elif any(keyword in texto_lower for keyword in ['añadir', 'agregar', 'crear', 'guardar', 'registrar']):
+            try:
+                sql_query = insert_chain.run(table="log", user_input=texto_lower)
                 with app.app_context():
-                    # Obtener los últimos 5 registros
-                    ultimos_registros = Log.query.order_by(Log.fecha_y_hora.desc()).limit(5).all()
-                    # Formatear la respuesta
-                    respuesta = "Aquí están los últimos registros:\n\n"
-                    for reg in ultimos_registros:
-                        respuesta += f"📅 {reg.fecha_y_hora.strftime('%Y-%m-%d %H:%M')}: {reg.texto}\n"
-                    return respuesta
-            else:
-                result = sql_agent.run(texto)
-                return result
-                
-        elif any(keyword in texto_lower for keyword in insert_keywords):
-            if "prueba" in texto_lower or "test" in texto_lower:
-                with app.app_context():
-                    nuevo_registro = Log(texto="Mensaje de prueba")
+                    nuevo_registro = Log(texto=texto_lower)
                     db.session.add(nuevo_registro)
                     db.session.commit()
-                return "✅ Mensaje de prueba insertado correctamente"
-            else:
-                # Extraer el mensaje a insertar después de los dos puntos
-                if ":" in texto:
-                    mensaje = texto.split(":", 1)[1].strip()
-                else:
-                    mensaje = texto
-                    
-                with app.app_context():
-                    nuevo_registro = Log(texto=mensaje)
-                    db.session.add(nuevo_registro)
-                    db.session.commit()
-                return "✅ Mensaje guardado correctamente"
-        else:
-            return None
-            
+                return "✅ Mensaje guardado correctamente en la base de datos."
+            except Exception as e:
+                print(f"Error en insert: {str(e)}")
+                return f"❌ Error al insertar: {str(e)}"
+
+        return None
+
     except Exception as e:
         print(f"Error en process_sql_query: {str(e)}")
-        return f"Lo siento, ocurrió un error al procesar tu consulta: {str(e)}"
+        return f"❌ Error al procesar la consulta: {str(e)}"
 
 #Funcion para ordenar los registros por fecha y hora
 def ordenar_por_fecha_y_hora(registros):
@@ -143,13 +122,17 @@ def get_chatgpt_response(texto):
         print("DETAILED ERROR:", str(e))
         print("Error type:", type(e))
         return f"Error detallado: {str(e)}"
-
+    
+#Funcion para agregar mensajes y guardar en la base de datos
 def agregar_mensajes_log(texto):
     mensajes_log.append(texto)
+
+    #Guardar el mensaje en la base de datos
     nuevo_registro = Log(texto=texto)
     db.session.add(nuevo_registro)
     db.session.commit()
 
+#Token de verificacion para la configuracion
 TOKEN_ANDERCODE = "ANDERCODE"
 
 @app.route('/webhook', methods=['GET','POST'])
@@ -184,6 +167,7 @@ def recibir_mensajes(req):
             if "type" in messages:
                 tipo = messages["type"]
 
+                #Guardar Log en la BD
                 agregar_mensajes_log(json.dumps(messages))
 
                 if tipo == "interactive":
@@ -207,6 +191,7 @@ def recibir_mensajes(req):
 
                     enviar_mensajes_whatsapp(text,numero)
 
+                    #Guardar Log en la BD
                     agregar_mensajes_log(json.dumps(messages))
 
         return jsonify({'message':'EVENT_RECEIVED'})
@@ -459,6 +444,7 @@ def enviar_mensajes_whatsapp(texto,number):
     else:
         # Primero intentar procesar como consulta SQL
         sql_response = process_sql_query(texto)
+        print(f"SQL Response: {sql_response}")  # Debug
         
         if sql_response:
             data = {
@@ -472,7 +458,7 @@ def enviar_mensajes_whatsapp(texto,number):
                 }
             }
         else:
-            # Si no es una consulta SQL, usar ChatGPT
+            # Si no es una consulta SQL, usar ChatGPT como antes
             respuesta = get_chatgpt_response(texto)
             data = {
                 "messaging_product": "whatsapp",
@@ -485,11 +471,13 @@ def enviar_mensajes_whatsapp(texto,number):
                 }
             }
 
+    #Convertir el diccionaria a formato JSON
     data = json.dumps(data)
-    
+
+    # Token
     headers = {
         "Content-Type" : "application/json",
-        "Authorization" : "Bearer EAAI8epaNZBKABOwHUXCVB0UIZC6EJ4X18qg1OkZAqZAydtUkyMhCPmuJR9hSDgZAXfmzRuZCrlZAgaLgrpiqQzwM5RqLBDSb8ZCSQFVZBV4P99xXuZBp44N7JkZAEIq8ZB9C9MyJmCwAxXAU3xCUHTCB1P72nPQVayQZC5lIE56VL2pyg5IBY7hxkGg2tCLVJNV7ZCaodV9ZAwZAKzXIPRwXmCukwhE6i9qJFYzQlTwLVS8ZD"
+        "Authorization" : "Bearer EAAI8epaNZBKABO2RkvBRKJKb4C9fWeTD7LC7ibV28t3kanq1b5nUkqLnIMkPZBCLfP07twzAfB2xwST77ym4WkqfGVCebDUjxVk16eJECQrlJPBRVy8cebSQAZAI4Du46iEwLQi6QNgfXhz9mMyRjBcBTRu2mVWOK6jAHRq3ekPgbLBzyKbSKjF5u0PnSl6qlfL0LpkseBjdr6UIWmqYJbXu7c1TvvUZCG4ZD"
     }
     
     connection = http.client.HTTPSConnection("graph.facebook.com")
@@ -504,4 +492,4 @@ def enviar_mensajes_whatsapp(texto,number):
         connection.close()
 
 if __name__=='__main__':
-    app.run(host='0.0.0.0',port=80,debug=True)      
+    app.run(host='0.0.0.0',port=80,debug=True)             
