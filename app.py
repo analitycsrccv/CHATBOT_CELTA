@@ -141,21 +141,42 @@ def recibir_mensajes(req):
 
 def enviar_mensajes_whatsapp(texto, number):
     texto = texto.lower()
-    
-    palabras_consulta = ['mostrar', 'ver', 'buscar', 'agregar', 'añadir', 'crear', 'consultar', 'listar']
+    palabras_consulta = ['mostrar', 'ver', 'buscar', 'muestra', 'dime', 'agregar', 'añadir', 'crear']
     
     if any(palabra in texto for palabra in palabras_consulta):
-        response = natural_to_sql(texto)
-        data = {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": number,
-            "type": "text",
-            "text": {
-                "preview_url": False,
-                "body": response
+        try:
+            print("Detectada palabra clave SQL:", texto)
+            
+            # Test directo de SQLite
+            with app.app_context():
+                test_query = Log.query.first()
+                print("Test de SQLite exitoso:", test_query)
+            
+            response = natural_to_sql(texto)
+            print("Respuesta del agente:", response)
+            
+            data = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": number,
+                "type": "text",
+                "text": {
+                    "preview_url": False,
+                    "body": f"Respuesta SQL: {response}"
+                }
             }
-        }
+        except Exception as e:
+            print("Error en procesamiento SQL:", str(e))
+            data = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": number,
+                "type": "text",
+                "text": {
+                    "preview_url": False,
+                    "body": get_chatgpt_response(texto)
+                }
+            }
     elif "hola" in texto:
         data = {
             "messaging_product": "whatsapp",
@@ -415,7 +436,7 @@ def enviar_mensajes_whatsapp(texto, number):
     data = json.dumps(data)
     headers = {
         "Content-Type": "application/json",
-        "Authorization": "Bearer EAAI8epaNZBKABO1r9LZAqYOPbwS9gBnokr6lc3qeAmPrCwJNZBUizB04f4r98ih5m5VMmo8gxcUE8KJEFBj20JIP52O6JVvbAzmR0OR4UzqAVHwLLXIDO7Q4AotGoM6zddVK5HOCvqmxcXBVU41ITnwy55D1QIbOQuhqQdPVu3PSYoWIjiIfxkJK1ONHFwlcz8fkZAbuglefifNlqCInLUbBqY8kSBT0s2T3hwZDZD"
+        "Authorization": "Bearer EAAI8epaNZBKABO2y05KV992fooZCdvZBMwaF0qvCFSQ5IhGEKyoSAXavSIefZBRcVaDQ8YWBAShiWqZBTZCJOjjqe02B8JZASfJNBPFrUzZAD7FSkjOfxWS9Ii2tsDBmp66vF4ZCgc7ip6xvzEiFe38bYcZCmdeUZARfCJ0JRFewaQAW2ZAnidhJbijX48BXOji155xwiLB1YeF5Fcdz8Tvym5jZCfYr8FDimW8foni4ZD"
     }
     
     connection = http.client.HTTPSConnection("graph.facebook.com")
