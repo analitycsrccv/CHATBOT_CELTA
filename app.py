@@ -59,25 +59,35 @@ def setup_sql_agent():
 def natural_to_sql(text):
     print(f"Procesando texto: {text}")
     try:
-        if "mostrar" in text.lower() or "ver" in text.lower():
-            agent = setup_sql_agent()
-            if agent:
-                result = agent.run(f"Consulta SQL para: {text}")
-                registros = Log.query.order_by(Log.fecha_y_hora.desc()).limit(5).all()
-                mensajes = [f"- {r.fecha_y_hora.strftime('%Y-%m-%d %H:%M')}: {r.texto}" for r in registros]
-                return "Últimos registros:\n" + "\n".join(mensajes)
-        elif "agregar" in text.lower() or "añadir" in text.lower():
-            agent = setup_sql_agent()
-            if agent:
-                result = agent.run(f"Generar INSERT para: {text}")
-                nuevo = Log(texto=text)
-                db.session.add(nuevo)
-                db.session.commit()
-                return "✅ Registro agregado correctamente"
-        return "No pude procesar la consulta"
+        with app.app_context():
+            if "mostrar" in text.lower() or "ver" in text.lower():
+                try:
+                    registros = Log.query.order_by(Log.fecha_y_hora.desc()).limit(5).all()
+                    print(f"Registros encontrados: {len(registros)}")
+                    mensajes = []
+                    for r in registros:
+                        msg = f"📝 {r.fecha_y_hora.strftime('%Y-%m-%d %H:%M')}: {r.texto}"
+                        mensajes.append(msg)
+                    return "📋 Últimos registros:\n\n" + "\n".join(mensajes) if mensajes else "No hay registros para mostrar"
+                except Exception as e:
+                    print(f"Error al consultar registros: {str(e)}")
+                    return "Error al consultar registros"
+            
+            elif "agregar" in text.lower() or "añadir" in text.lower():
+                try:
+                    nuevo = Log(texto=text)
+                    db.session.add(nuevo)
+                    db.session.commit()
+                    return "✅ Registro agregado correctamente"
+                except Exception as e:
+                    print(f"Error al agregar registro: {str(e)}")
+                    return "Error al agregar registro"
+            
+            return "Comando no reconocido. Usa 'ver registros' o 'agregar mensaje'"
+            
     except Exception as e:
-        print(f"Error en natural_to_sql: {str(e)}")
-        return f"❌ Error al procesar la consulta: {str(e)}"
+        print(f"Error general en natural_to_sql: {str(e)}")
+        return f"Error al procesar la consulta: {str(e)}"
 
 def ordenar_por_fecha_y_hora(registros):
     return sorted(registros, key=lambda x: x.fecha_y_hora, reverse=True)
