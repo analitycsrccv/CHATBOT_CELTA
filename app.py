@@ -6,6 +6,12 @@ import json
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
+from langchain_openai import OpenAI as LangChainOpenAI
+from langchain.agents import create_sql_agent
+from langchain.agents.agent_toolkits import SQLDatabaseToolkit
+from langchain_community.utilities import SQLDatabase
+from langchain.agents import AgentExecutor
+from langchain_core.prompts import PromptTemplate
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
@@ -23,6 +29,56 @@ class Log(db.Model):
 with app.app_context():
     db.create_all()
 
+def setup_sql_agent():
+    try:
+        db = SQLDatabase.from_uri("sqlite:///metapython.db")
+        llm = LangChainOpenAI(temperature=0, api_key=os.getenv('OPENAI_API_KEY'))
+        toolkit = SQLDatabaseToolkit(db=db, llm=llm)
+        
+        custom_prompt = """Eres un agente que interpreta lenguaje natural y genera consultas SQL.
+        SOLO puedes realizar operaciones SELECT o INSERT en la tabla 'log'.
+        Para consultas de tipo "mostrar", "ver", "buscar": Genera un SELECT.
+        Para consultas de tipo "agregar", "añadir", "crear": Genera un INSERT.
+        La tabla 'log' tiene las columnas: id, fecha_y_hora (tipo DateTime), texto (tipo TEXT).
+        
+        Human: {input}
+        Assistant: Analizaré tu consulta y generaré el SQL apropiado."""
+        
+        agent = create_sql_agent(
+            llm=llm,
+            toolkit=toolkit,
+            verbose=True,
+            agent_type="zero-shot-react-description",
+            prefix=custom_prompt
+        )
+        return agent
+    except Exception as e:
+        print(f"Error en setup_sql_agent: {str(e)}")
+        return None
+
+def natural_to_sql(text):
+    print(f"Procesando texto: {text}")
+    try:
+        if "mostrar" in text.lower() or "ver" in text.lower():
+            agent = setup_sql_agent()
+            if agent:
+                result = agent.run(f"Consulta SQL para: {text}")
+                registros = Log.query.order_by(Log.fecha_y_hora.desc()).limit(5).all()
+                mensajes = [f"- {r.fecha_y_hora.strftime('%Y-%m-%d %H:%M')}: {r.texto}" for r in registros]
+                return "Últimos registros:\n" + "\n".join(mensajes)
+        elif "agregar" in text.lower() or "añadir" in text.lower():
+            agent = setup_sql_agent()
+            if agent:
+                result = agent.run(f"Generar INSERT para: {text}")
+                nuevo = Log(texto=text)
+                db.session.add(nuevo)
+                db.session.commit()
+                return "✅ Registro agregado correctamente"
+        return "No pude procesar la consulta"
+    except Exception as e:
+        print(f"Error en natural_to_sql: {str(e)}")
+        return f"❌ Error al procesar la consulta: {str(e)}"
+
 def ordenar_por_fecha_y_hora(registros):
     return sorted(registros, key=lambda x: x.fecha_y_hora, reverse=True)
 
@@ -33,23 +89,6 @@ def index():
     return render_template('index.html', registros=registros_ordenados)
 
 mensajes_log = []
-
-def natural_to_sql(text):
-    print(f"Procesando texto: {text}")
-    try:
-        with app.app_context():
-            if "mostrar" in text or "ver" in text:
-                registros = Log.query.order_by(Log.fecha_y_hora.desc()).limit(5).all()
-                mensajes = [f"- {r.fecha_y_hora.strftime('%Y-%m-%d %H:%M')}: {r.texto}" for r in registros]
-                return "Últimos registros:\n" + "\n".join(mensajes)
-            elif "agregar" in text or "añadir" in text:
-                nuevo = Log(texto=text)
-                db.session.add(nuevo)
-                db.session.commit()
-                return "✅ Registro agregado correctamente"
-    except Exception as e:
-        print(f"Error en natural_to_sql: {str(e)}")
-        return f"❌ Error al procesar la consulta: {str(e)}"
 
 def get_chatgpt_response(texto):
     try:
@@ -406,4 +445,4 @@ def enviar_mensajes_whatsapp(texto, number):
         connection.close()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=80, debug=True)     
+    app.run(host='0.0.0.0', port=80, debug=True)        
