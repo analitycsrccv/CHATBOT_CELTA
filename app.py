@@ -6,139 +6,158 @@ import json
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
+from langchain_openai import OpenAI as LangChainOpenAI
+from langchain.agents import create_sql_agent
+from langchain.agents.agent_toolkits import SQLDatabaseToolkit
+from langchain_community.utilities import SQLDatabase
+from langchain.agents import AgentExecutor
+from langchain_core.prompts import PromptTemplate
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 app = Flask(__name__)
 
-#Configuracion de la base de datos SQLITE
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///metapython.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
-#Modelo de la tabla log
 class Log(db.Model):
-    id = db.Column(db.Integer,primary_key=True)
+    id = db.Column(db.Integer, primary_key=True)
     fecha_y_hora = db.Column(db.DateTime, default=datetime.utcnow)
     texto = db.Column(db.TEXT)
 
-#Crear la tabla si no existe
 with app.app_context():
     db.create_all()
 
-#Funcion para ordenar los registros por fecha y hora
 def ordenar_por_fecha_y_hora(registros):
-    return sorted(registros, key=lambda x: x.fecha_y_hora,reverse=True)
+    return sorted(registros, key=lambda x: x.fecha_y_hora, reverse=True)
 
 @app.route('/')
 def index():
-    #obtener todos los registros de la base de datos
     registros = Log.query.all()
     registros_ordenados = ordenar_por_fecha_y_hora(registros)
-    return render_template('index.html',registros=registros_ordenados)
+    return render_template('index.html', registros=registros_ordenados)
 
 mensajes_log = []
 
+def setup_sql_agent():
+    db = SQLDatabase.from_uri("sqlite:///metapython.db")
+    llm = LangChainOpenAI(temperature=0, api_key=os.getenv('OPENAI_API_KEY'))
+    toolkit = SQLDatabaseToolkit(db=db, llm=llm)
+    
+    custom_prompt = """Eres un agente que interpreta lenguaje natural y lo convierte a consultas SQL.
+    SOLO puedes realizar operaciones SELECT o INSERT.
+    Para consultas tipo "mostrar", "ver", "buscar": Genera un SELECT apropiado.
+    Para consultas tipo "agregar", "añadir", "crear": Genera un INSERT apropiado.
+    Enfócate en la tabla 'log' que tiene las columnas: id, fecha_y_hora, texto.
+    
+    Human: {input}
+    Assistant: Procesaré tu consulta."""
+    
+    agent_executor = create_sql_agent(
+        llm=llm,
+        toolkit=toolkit,
+        verbose=True,
+        agent_type="zero-shot-react-description",
+        prefix=custom_prompt
+    )
+    return agent_executor
+
+def natural_to_sql(text):
+    try:
+        agent = setup_sql_agent()
+        result = agent.run(text)
+        return result
+    except Exception as e:
+        return f"Error en la consulta: {str(e)}"
+
 def get_chatgpt_response(texto):
     try:
-        print("API Key being used:", os.getenv('OPENAI_API_KEY'))  # Para ver si la clave se está cargando
-        print("Attempting to call OpenAI with text:", texto)
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[{
-                "role": "user",
-                "content": texto
-            }],
+            messages=[{"role": "user", "content": texto}],
             max_tokens=150
         )
-        print("OpenAI response received:", response)
         return response.choices[0].message.content
     except Exception as e:
-        print("DETAILED ERROR:", str(e))
-        print("Error type:", type(e))
-        return f"Error detallado: {str(e)}"  
-
-#Funcion para agregar mensajes y guardar en la base de datos
+        return f"Error detallado: {str(e)}"
+    
 def agregar_mensajes_log(texto):
     mensajes_log.append(texto)
-
-    #Guardar el mensaje en la base de datos
     nuevo_registro = Log(texto=texto)
     db.session.add(nuevo_registro)
     db.session.commit()
 
-#Token de verificacion para la configuracion
 TOKEN_ANDERCODE = "ANDERCODE"
 
 @app.route('/webhook', methods=['GET','POST'])
 def webhook():
     if request.method == 'GET':
-        challenge = verificar_token(request)
-        return challenge
-    elif request.method == 'POST':
-        reponse = recibir_mensajes(request)
-        return reponse
+        return verificar_token(request)
+    return recibir_mensajes(request)
 
 def verificar_token(req):
     token = req.args.get('hub.verify_token')
     challenge = req.args.get('hub.challenge')
-
     if challenge and token == TOKEN_ANDERCODE:
         return challenge
-    else:
-        return jsonify({'error':'Token Invalido'}),401
+    return jsonify({'error':'Token Invalido'}), 401
 
 def recibir_mensajes(req):
     try:
         req = request.get_json()
-        entry =req['entry'][0]
+        entry = req['entry'][0]
         changes = entry['changes'][0]
         value = changes['value']
         objeto_mensaje = value['messages']
 
         if objeto_mensaje:
             messages = objeto_mensaje[0]
-
             if "type" in messages:
                 tipo = messages["type"]
-
-                #Guardar Log en la BD
                 agregar_mensajes_log(json.dumps(messages))
 
                 if tipo == "interactive":
                     tipo_interactivo = messages["interactive"]["type"]
-
                     if tipo_interactivo == "button_reply":
                         text = messages["interactive"]["button_reply"]["id"]
                         numero = messages["from"]
-
-                        enviar_mensajes_whatsapp(text,numero)
-                    
+                        enviar_mensajes_whatsapp(text, numero)
                     elif tipo_interactivo == "list_reply":
                         text = messages["interactive"]["list_reply"]["id"]
                         numero = messages["from"]
-
-                        enviar_mensajes_whatsapp(text,numero)
+                        enviar_mensajes_whatsapp(text, numero)
 
                 if "text" in messages:
                     text = messages["text"]["body"]
                     numero = messages["from"]
-
-                    enviar_mensajes_whatsapp(text,numero)
-
-                    #Guardar Log en la BD
+                    enviar_mensajes_whatsapp(text, numero)
                     agregar_mensajes_log(json.dumps(messages))
 
         return jsonify({'message':'EVENT_RECEIVED'})
     except Exception as e:
         return jsonify({'message':'EVENT_RECEIVED'})
-    
-def enviar_mensajes_whatsapp(texto,number):
-    texto = texto.lower()
 
-    if "hola" in texto:
-        data={
+def enviar_mensajes_whatsapp(texto, number):
+    texto = texto.lower()
+    
+    palabras_consulta = ['mostrar', 'ver', 'buscar', 'agregar', 'añadir', 'crear', 'consultar', 'listar']
+    
+    if any(palabra in texto for palabra in palabras_consulta):
+        response = natural_to_sql(texto)
+        data = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": number,
+            "type": "text",
+            "text": {
+                "preview_url": False,
+                "body": response
+            }
+        }
+    elif "hola" in texto:
+        data = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": number,
@@ -156,7 +175,7 @@ def enviar_mensajes_whatsapp(texto,number):
             "type": "text",
             "text": {
                 "preview_url": False,
-                "body": "Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book. It has survived not only five centuries, but also the leap into electronic typesetting, remaining essentially unchanged. It was popularised in the 1960s with the release of Letraset sheets containing Lorem Ipsum passages, and more recently with desktop publishing software like Aldus PageMaker including versions of Lorem Ipsum."
+                "body": "Lorem Ipsum is simply dummy text of the printing and typesetting industry. Lorem Ipsum has been the industry's standard dummy text ever since the 1500s, when an unknown printer took a galley of type and scrambled it to make a type specimen book."
             }
         }
     elif "2" in texto:
@@ -172,18 +191,18 @@ def enviar_mensajes_whatsapp(texto,number):
             }
         }
     elif "3" in texto:
-        data={
+        data = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": number,
             "type": "document",
             "document": {
-                    "link": "https://www.turnerlibros.com/wp-content/uploads/2021/02/ejemplo.pdf",
-                    "caption": "Temario del Curso #001"
-                }
+                "link": "https://www.turnerlibros.com/wp-content/uploads/2021/02/ejemplo.pdf",
+                "caption": "Temario del Curso #001"
             }
+        }
     elif "4" in texto:
-        data={
+        data = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": number,
@@ -240,8 +259,8 @@ def enviar_mensajes_whatsapp(texto,number):
             "recipient_type": "individual",
             "to": number,
             "type": "interactive",
-            "interactive":{
-                "type":"button",
+            "interactive": {
+                "type": "button",
                 "body": {
                     "text": "¿Confirmas tu registro?"
                 },
@@ -249,24 +268,26 @@ def enviar_mensajes_whatsapp(texto,number):
                     "text": "Selecciona una de las opciones"
                 },
                 "action": {
-                    "buttons":[
+                    "buttons": [
                         {
                             "type": "reply",
-                            "reply":{
-                                "id":"btnsi",
-                                "title":"Si"
+                            "reply": {
+                                "id": "btnsi",
+                                "title": "Si"
                             }
-                        },{
+                        },
+                        {
                             "type": "reply",
-                            "reply":{
-                                "id":"btnno",
-                                "title":"No"
+                            "reply": {
+                                "id": "btnno",
+                                "title": "No"
                             }
-                        },{
+                        },
+                        {
                             "type": "reply",
-                            "reply":{
-                                "id":"btntalvez",
-                                "title":"Tal Vez"
+                            "reply": {
+                                "id": "btntalvez",
+                                "title": "Tal Vez"
                             }
                         }
                     ]
@@ -307,46 +328,47 @@ def enviar_mensajes_whatsapp(texto,number):
             }
         }
     elif "lista" in texto:
-        data ={
+        data = {
             "messaging_product": "whatsapp",
             "to": number,
             "type": "interactive",
-            "interactive":{
-                "type" : "list",
+            "interactive": {
+                "type": "list",
                 "body": {
                     "text": "Selecciona Alguna Opción"
                 },
                 "footer": {
                     "text": "Selecciona una de las opciones para poder ayudarte"
                 },
-                "action":{
-                    "button":"Ver Opciones",
-                    "sections":[
+                "action": {
+                    "button": "Ver Opciones",
+                    "sections": [
                         {
-                            "title":"Compra y Venta",
-                            "rows":[
+                            "title": "Compra y Venta",
+                            "rows": [
                                 {
-                                    "id":"btncompra",
-                                    "title" : "Comprar",
+                                    "id": "btncompra",
+                                    "title": "Comprar",
                                     "description": "Compra los mejores articulos de tecnologia"
                                 },
                                 {
-                                    "id":"btnvender",
-                                    "title" : "Vender",
+                                    "id": "btnvender",
+                                    "title": "Vender",
                                     "description": "Vende lo que ya no estes usando"
                                 }
                             ]
-                        },{
-                            "title":"Distribución y Entrega",
-                            "rows":[
+                        },
+                        {
+                            "title": "Distribución y Entrega",
+                            "rows": [
                                 {
-                                    "id":"btndireccion",
-                                    "title" : "Local",
+                                    "id": "btndireccion",
+                                    "title": "Local",
                                     "description": "Puedes visitar nuestro local."
                                 },
                                 {
-                                    "id":"btnentrega",
-                                    "title" : "Entrega",
+                                    "id": "btnentrega",
+                                    "title": "Entrega",
                                     "description": "La entrega se realiza todos los dias."
                                 }
                             ]
@@ -390,26 +412,21 @@ def enviar_mensajes_whatsapp(texto,number):
             }
         }
 
-    #Convertir el diccionaria a formato JSON
     data = json.dumps(data)
-
-    # Token
     headers = {
-        "Content-Type" : "application/json",
-        "Authorization" : "Bearer EAAI8epaNZBKABO1r9LZAqYOPbwS9gBnokr6lc3qeAmPrCwJNZBUizB04f4r98ih5m5VMmo8gxcUE8KJEFBj20JIP52O6JVvbAzmR0OR4UzqAVHwLLXIDO7Q4AotGoM6zddVK5HOCvqmxcXBVU41ITnwy55D1QIbOQuhqQdPVu3PSYoWIjiIfxkJK1ONHFwlcz8fkZAbuglefifNlqCInLUbBqY8kSBT0s2T3hwZDZD"
+        "Content-Type": "application/json",
+        "Authorization": "Bearer EAAI8epaNZBKABO1r9LZAqYOPbwS9gBnokr6lc3qeAmPrCwJNZBUizB04f4r98ih5m5VMmo8gxcUE8KJEFBj20JIP52O6JVvbAzmR0OR4UzqAVHwLLXIDO7Q4AotGoM6zddVK5HOCvqmxcXBVU41ITnwy55D1QIbOQuhqQdPVu3PSYoWIjiIfxkJK1ONHFwlcz8fkZAbuglefifNlqCInLUbBqY8kSBT0s2T3hwZDZD"
     }
     
     connection = http.client.HTTPSConnection("graph.facebook.com")
-    
     try:
-        connection.request("POST","/v21.0/484107578125461/messages", data, headers)
+        connection.request("POST", "/v21.0/484107578125461/messages", data, headers)
         response = connection.getresponse()
         print(response.status, response.reason)
     except Exception as e:
-        agregar_mensajes_log(json.dumps(e))
+        agregar_mensajes_log(json.dumps(str(e)))
     finally:
         connection.close()
 
-if __name__=='__main__':
-    app.run(host='0.0.0.0',port=80,debug=True) 
-      
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=80, debug=True)    
